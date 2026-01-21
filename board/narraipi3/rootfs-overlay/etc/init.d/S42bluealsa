@@ -1,0 +1,56 @@
+#!/bin/sh
+
+DAEMON="bluealsa"
+DAEMON_PATH="/usr/bin/bluealsa"
+PIDFILE="/var/run/${DAEMON}.pid"
+
+DAEMON_ARGS="-p a2dp-sink -p a2dp-source"
+
+start() {
+        printf 'Starting %s: ' "$DAEMON"
+        start-stop-daemon --start --background --make-pidfile \
+                --pidfile "$PIDFILE" \
+                --exec "$DAEMON_PATH" -- $DAEMON_ARGS
+        status=$?
+        if [ "$status" -eq 0 ]; then
+                echo "OK"
+        else
+                echo "FAIL"
+        fi
+        return "$status"
+}
+
+stop() {
+        printf 'Stopping %s: ' "$DAEMON"
+        start-stop-daemon --stop --pidfile "$PIDFILE" \
+                --exec "$DAEMON_PATH"
+        status=$?
+        if [ "$status" -eq 0 ]; then
+                echo "OK"
+        else
+                echo "FAIL"
+                return "$status"
+        fi
+
+        while start-stop-daemon --stop --test --quiet \
+                --pidfile "$PIDFILE" --exec "$DAEMON_PATH"; do
+                sleep 0.1
+        done
+
+        rm -f "$PIDFILE"
+        return "$status"
+}
+
+restart() {
+        stop
+        start
+}
+
+case "$1" in
+        start|stop|restart)
+                "$1"
+                ;;
+        *)
+                echo "Usage: $0 {start|stop|restart}"
+                exit 1
+esac
