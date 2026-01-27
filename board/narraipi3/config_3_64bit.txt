@@ -6,6 +6,7 @@
 
 start_file=start.elf
 fixup_file=fixup.dat
+start_x=1
 
 kernel=Image
 
@@ -18,13 +19,16 @@ disable_overscan=1
 
 # How much memory in MB to assign to the GPU on Pi models having
 # 256, 512 or 1024 MB total memory
-gpu_mem_256=100
-gpu_mem_512=100
-gpu_mem_1024=100
+gpu_mem_256=128
+gpu_mem_512=128
+gpu_mem_1024=128
 
 # Enable UART0 for serial console on ttyAMA0
+dtoverlay=ov5647,cam0
 dtoverlay=miniuart-bt
+dtparam=i2c_arm=on
 dtparam=audio=on
+camera_auto_detect=0
 
 # enable 64bits support
 arm_64bit=1
