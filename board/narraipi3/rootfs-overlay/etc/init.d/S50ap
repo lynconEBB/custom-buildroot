@@ -1,0 +1,121 @@
+#!/bin/sh
+#
+# STA + AP init script with automatic AP channel selection
+#
+
+STA_IF="wlan0"
+AP_IF="ap0"
+
+WPA_CONF="/etc/wpa_supplicant.conf"
+HOSTAPD_CONF="/run/hostapd-ap.conf"
+
+STA_TIMEOUT=20
+
+##############################################################################
+
+wait_for_iface() {
+    IFACE="$1"
+    TIMEOUT="$2"
+    while [ "$TIMEOUT" -gt 0 ]; do
+        ip link show "$IFACE" >/dev/null 2>&1 && return 0
+        sleep 1
+        TIMEOUT=$((TIMEOUT - 1))
+    done
+    return 1
+}
+
+wait_for_sta_assoc() {
+    TIMEOUT="$1"
+    while [ "$TIMEOUT" -gt 0 ]; do
+        iw dev "$STA_IF" link | grep -q "Connected" && return 0
+        sleep 1
+        TIMEOUT=$((TIMEOUT - 1))
+    done
+    return 1
+}
+
+get_sta_channel() {
+    FREQ=$(iw dev "$STA_IF" link | awk '/freq:/ {print $2}')
+    [ -z "$FREQ" ] && return 1
+
+    # 2.4 GHz only (BCM43430 limitation)
+    echo $(( (FREQ - 2407) / 5 ))
+}
+
+create_ap_iface() {
+    iw dev "$AP_IF" del >/dev/null 2>&1 || true
+    iw dev "$STA_IF" interface add "$AP_IF" type __ap
+    ip link set "$AP_IF" up
+}
+
+write_hostapd_conf() {
+    CHANNEL="$1"
+
+    cat > "$HOSTAPD_CONF" <<EOF
+interface=$AP_IF
+driver=nl80211
+
+ssid=MyDeviceAP
+hw_mode=g
+channel=$CHANNEL
+wmm_enabled=0
+
+auth_algs=1
+wpa=2
+wpa_passphrase=12345678
+wpa_key_mgmt=WPA-PSK
+rsn_pairwise=CCMP
+EOF
+}
+
+stop_all() {
+    killall hostapd 2>/dev/null || true
+    killall wpa_supplicant 2>/dev/null || true
+    killall udhcpc 2>/dev/null || true
+    iw dev "$AP_IF" del 2>/dev/null || true
+    ip link set "$STA_IF" down 2>/dev/null || true
+}
+
+##############################################################################
+
+case "$1" in
+    start)
+        echo "Starting Wi-Fi STA + AP (auto-channel)"
+        wait_for_iface "$STA_IF" "$STA_TIMEOUT" || {
+            echo "ERROR: wlan0 not found"
+            exit 1
+        }
+
+        echo "Waiting for STA association..."
+        wait_for_sta_assoc 15 || {
+            echo "ERROR: STA did not associate"
+            exit 1
+        }
+
+        CHANNEL=$(get_sta_channel) || {
+            echo "ERROR: failed to determine STA channel"
+            exit 1
+        }
+
+        echo "STA channel detected: $CHANNEL"
+
+        create_ap_iface
+        write_hostapd_conf "$CHANNEL"
+
+        hostapd -B "$HOSTAPD_CONF"
+        echo "Wi-Fi STA + AP started on channel $CHANNEL"
+        ;;
+    stop)
+        stop_all
+        ;;
+    restart)
+        "$0" stop
+        sleep 1
+        "$0" start
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
+        ;;
+esac
+
