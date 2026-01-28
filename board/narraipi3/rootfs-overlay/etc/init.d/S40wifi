@@ -1,0 +1,69 @@
+#!/bin/sh
+#
+# Simple WLAN startup script for Buildroot
+#
+
+IFACE="wlan0"
+WPA_CONF="/etc/wpa_supplicant.conf"
+WPA_PID="/var/run/wpa_supplicant-${IFACE}.pid"
+UDHCPC_PID="/var/run/udhcpc-${IFACE}.pid"
+WPA_TIMEOUT=5   # seconds
+
+case "$1" in
+    start)
+        echo "Starting Wi-Fi on ${IFACE}..."
+
+        ip link set "${IFACE}" up || exit 1
+
+        wpa_supplicant -B \
+            -i "${IFACE}" \
+            -c "${WPA_CONF}" \
+            -P "${WPA_PID}"
+
+        echo "Waiting for Wi-Fi association..."
+        for i in $(seq 1 "${WPA_TIMEOUT}"); do
+            state="$(wpa_cli -i "${IFACE}" status 2>/dev/null \
+                | awk -F= '/^wpa_state=/ {print $2}')"
+
+            if [ "${state}" = "COMPLETED" ]; then
+                echo "Wi-Fi connected"
+                udhcpc -i "${IFACE}" -p "${UDHCPC_PID}" -b
+                return 0
+            fi
+            sleep 1
+        done
+        echo "Wi-Fi not connected, DHCP not started"
+        return 1
+        ;;
+    
+    stop)
+        echo "Stopping Wi-Fi on ${IFACE}..."
+
+        if [ -f "${UDHCPC_PID}" ]; then
+            kill "$(cat "${UDHCPC_PID}")" 2>/dev/null
+            rm -f "${UDHCPC_PID}"
+        fi
+
+        if [ -f "${WPA_PID}" ]; then
+            kill "$(cat "${WPA_PID}")" 2>/dev/null
+            rm -f "${WPA_PID}"
+        fi
+
+        ip link set "${IFACE}" down
+
+        echo "Wi-Fi stopped"
+        ;;
+    
+    restart|reload)
+        "$0" stop
+        sleep 1
+        "$0" start
+        ;;
+    
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
+        ;;
+esac
+
+exit 0
